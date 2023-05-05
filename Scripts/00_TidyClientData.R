@@ -81,12 +81,17 @@
       select(Region, Woreda, Age, Gender, `Client ART Start Date`, `Missed Appointment Date`, `LTFU Recorded Date`) %>%
       mutate(Sex = ifelse(Gender == "Male", "0", "1"))%>%
       mutate(age_bands = case_when(
-        Age %in% c(0:14) ~ "<15",
-        Age %in% c(15:24) ~ "15-24",
-        Age %in% c(25:35) ~ "25-35", 
-        Age %in% c(36:45) ~ "36-45", 
-        Age %in% c(46:50) ~ "46-50",
-        Age %in% c(51:99) ~ ">50"))%>%
+        Age %in% c(0:4) ~ "0-4",
+        Age %in% c(5:9) ~ "5-9",
+        Age %in% c(10:14) ~ "10-14", 
+        Age %in% c(15:19) ~ "15-19", 
+        Age %in% c(20:24) ~ "20-24",
+        Age %in% c(25:29) ~ "25-29",
+        Age %in% c(30:34) ~ "30-34",
+        Age %in% c(35:39) ~ "35-39",
+        Age %in% c(40:44) ~ "40-44",
+        Age %in% c(45:49) ~ "45-49",
+        Age %in% c(50:100) ~ "50+"))%>%
 
                                     
                                    
@@ -96,5 +101,5 @@
   #  
 
 # SPINDOWN ============================================================================
-
+    
                                 
