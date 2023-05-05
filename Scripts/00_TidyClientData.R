@@ -1,70 +1,46 @@
 # PROJECT: Ethiopia Community Program IIT Analysis 
 # PURPOSE: Munge and Analysis of IIT Data 
-# AUTHOR: Lemlem Baraki | SI
+# AUTHOR: Lemlem Baraki, Karishma Srikanth | SI
 # REF ID:   69cbff36
 # LICENSE: MIT
 # DATE: 2023-05-04
 # NOTES: Lemlem Baraki | SI
 
-# LOCALS & SETUP ============================================================================
+# DEPENDENCIES ------------------------------------------------------------
 
-  # Libraries
-  library(glitr)
-  library(glamr)
-  library(gisr)
-  library(gophr)
-  library(tidyverse)
-  library(scales)
-  library(sf)
-  library(extrafont)
-  library(tidytext)
-  library(patchwork)
-  library(ggtext)
-  library(gagglr)
-  library(readxl)
-  library(glue)
-  library(gt)
-  library(gtExtras)
-  library(tameDP)
-  
-    
-  # SI specific paths/functions  
-    load_secrets()
-    merdata <- file.path(glamr::si_path("path_msd"))
-    msd_path <- return_latest(folderpath = merdata, pattern = "_PSNU_IM_FY21-23.*Ethiopia")
-    
-  
-  # Grab metadata
-    get_metadata(msd_path)
-    
-    data_folder <- "Data/"
-    
-   #msd_source <- source_info(file_path)
-   #curr_pd <- source_info(file_path, return = "period")
-   #pd <- source_info(file_path, return = "period")
-   #fy <- source_info(file_path, return = "fiscal_year")
-   #qtr <- source_info(file_path, return = "quarter")  
-  
-  # REF ID for plots
-    ref_id <- "69cbff36"
-    
-  # Functions  
-  
+library(glamr)
+library(tidyverse)
+library(glitr)
+library(gophr)
+library(extrafont)
+library(scales)
+library(tidytext)
+library(patchwork)
+library(ggtext)
+library(glue)
+library(readxl)
+library(googlesheets4)
 
-# LOAD DATA ============================================================================  
 
-  #PEPFAR 
-    df_msd <- read_psd(msd_path)
-    
-  #Patient level data 
-    df_ptlevel <- data_folder %>% 
-      return_latest("semi_processed _Dataset_Et f IIT .xlsx") %>% 
-      read_xlsx(sheet = "Client Data fy 22& 23 as of Q2")
-    
-    
+# GLOBAL VARIABLES --------------------------------------------------------
 
-# MUNGE ============================================================================
-  
+# SI specific paths/functions  
+load_secrets()
+
+data_folder <- "Data/"
+
+
+ref_id <- "09b4f778"
+
+# IMPORT ------------------------------------------------------------------
+
+df <- data_folder %>% 
+  return_latest("IIT FY 22 & FY 23") %>% 
+  read_excel() %>% 
+  janitor::clean_names()
+
+# MUNGE -------------------------------------------------------------------
+
     #pt level data
       #want to have columns of age, sex, ART duration, LTFU duration
         #age groups: <15, 15-24, 25-35, 36-45, 46-50, >50 (align with MER)
@@ -74,32 +50,39 @@
       #make several new variables from columns (K-J), (L-K), (L-I)
       #new columns (V-X): traced & located (yes/no),return to TX (yes/no), reason for not return to TX (comment) 
     
-    view(df_ptlevel)
-    
-    pt_level <- df_ptlevel %>%
-      #rename(Sex = Gender)%>%
-      select(Region, Woreda, Age, Gender, `Client ART Start Date`, `Missed Appointment Date`, `LTFU Recorded Date`) %>%
-      mutate(Sex = ifelse(Gender == "Male", "0", "1"))%>%
-      mutate(age_bands = case_when(
-        Age %in% c(1:4) ~ "1-4",
-        Age %in% c(5:9) ~ "5-9",
-        Age %in% c(10:14) ~ "10-14", 
-        Age %in% c(15:19) ~ "15-19", 
-        Age %in% c(20:24) ~ "20-24",
-        Age %in% c(25:29) ~ "25-29",
-        Age %in% c(30:34) ~ "30-34",
-        Age %in% c(35:39) ~ "35-39",
-        Age %in% c(40:44) ~ "40-44",
-        Age %in% c(45:49) ~ "45-49",
-        Age %in% c(50:100) ~ "50+"))%>%
+# Address age / sex recoding - align to MER
+df_clean <- df %>% 
+  #select(region, woreda, age, gender, client_art_start_date, missed_appointment_date, ltfu_recorded_date) %>%
+  mutate(sex_binary = ifelse(gender == "Male", "1", "0")) %>%
+  mutate(age_bands = case_when(
+    age %in% c(1:4) ~ "1-4",
+    age %in% c(5:9) ~ "5-9",
+    age %in% c(10:14) ~ "10-14", 
+    age %in% c(15:19) ~ "15-19", 
+    age %in% c(20:24) ~ "20-24",
+    age %in% c(25:29) ~ "25-29",
+    age %in% c(30:34) ~ "30-34",
+    age %in% c(35:39) ~ "35-39",
+    age %in% c(40:44) ~ "40-44",
+    age %in% c(45:49) ~ "45-49",
+    age %in% c(50:100) ~ "50+"))
 
-                                    
+#Create Tracing variable and RTT variable
+
+# If Column U == Return to Clinc, Active on Treatment, Hospitalized, Self Transfer Out → Returned to Treatment
+# If Column U == Refused, Death → No for RTT
+
+
+df_clean %>% 
+  mutate(traced_binary = ifelse(ltfu_outcome_2 %in% c("Unknown Outcome", "No information found", "Other"), 0, 1)) %>% 
+  mutate(traced = ifelse(traced_binary == 1, "Traced", "Not Traced")) %>% 
+  mutate(rtt_binary = ifelse(ltfu_outcome_2 %in% c("Returned to clinic", "Active on treatment", "Hospitalized", "Self transfered out"), 1, 0)) %>% 
+  mutate(rtt = ifelse(rtt_binary == 1, "RTT", "Not RTT")) 
                                    
   
-# VIZ ============================================================================
+# VIZ -------------------------------------------------------------------
 
-  #  
+# SPINDOWN -------------------------------------------------------------------
 
-# SPINDOWN ============================================================================
     
                                 
