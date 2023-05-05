@@ -68,18 +68,57 @@ df_clean <- df %>%
     age %in% c(50:100) ~ "50+"))
 
 #Create Tracing variable and RTT variable
-
-# If Column U == Return to Clinc, Active on Treatment, Hospitalized, Self Transfer Out → Returned to Treatment
-# If Column U == Refused, Death → No for RTT
-
-
-df_clean %>% 
-  mutate(traced_binary = ifelse(ltfu_outcome_2 %in% c("Unknown Outcome", "No information found", "Other"), 0, 1)) %>% 
+df_clean <- df_clean %>% 
+  mutate(traced_binary = ifelse(ltfu_outcome_2 %in% c("Unknown Outcome", "No information found"), 0, 1)) %>% 
   mutate(traced = ifelse(traced_binary == 1, "Traced", "Not Traced")) %>% 
   mutate(rtt_binary = ifelse(ltfu_outcome_2 %in% c("Returned to clinic", "Active on treatment", "Hospitalized", "Self transfered out"), 1, 0)) %>% 
   mutate(rtt = ifelse(rtt_binary == 1, "RTT", "Not RTT")) 
-                                   
+
+#convert all date formats
+df_clean <- df_clean %>% 
+  #mutate(flag_date_issue = ifelse(client_art_start_date == "Monday, January 1, 1900", TRUE, FALSE)) %>% 
+  mutate(across(contains("date"), ~str_replace(., "^\\S* ", ""))) %>% 
+  mutate(across(contains("date"), ~mdy(.))) 
+
+#create ART duration
+df_group <- df_clean %>% 
+  mutate(flag_date_issue = ifelse(client_art_start_date == as.Date("1900-01-01"), TRUE, FALSE)) %>% #add flag for date issue
+   mutate(art_duration = missed_appointment_date - client_art_start_date) %>% 
+  mutate(art_duration = ifelse(art_duration < 0, NA, art_duration)) %>% #if art duration is negative, return NA
+  mutate(art_duration_grp = case_when(art_duration < 365 ~ "<1 year",
+                                      art_duration >= 365 & art_duration <1095 ~ "1-3 years",
+                                      art_duration >=1095 & art_duration <2190 ~ "3-6 years",
+                                      art_duration >=2190 & art_duration <3650 ~ "6-10 years",
+                                      art_duration >=3650 ~ ">10 years")) 
   
+# Create LTFU duration in months: <1 month , 1-3 months, 4-6 months, >6 months
+# create new variable for record of LTFU ( J-I column; Missed appointment date - LTFU Date)
+# create new variable ( K-J) then create groups (LTFU date to CRP assigned for tracing)
+# create new variable ( L-K) then create groups (Trace data minus CRP)
+# create variable for L-I then create groups (Missed appointment → tracing date)
+
+ df_final <- df_group %>% 
+    #time from missed appt to when LTFU recorded
+    mutate(record_ltfu_duration = ltfu_recorded_date - missed_appointment_date) %>% 
+    mutate(record_ltfu_duration = ifelse(record_ltfu_duration < 0, NA, record_ltfu_duration)) %>% #if art duration is negative, return NA
+    #time from LTFU Recorded to when CRP assigned
+    mutate(ltfu_crp_duration = crp_assigned_date_for_tracing -ltfu_recorded_date) %>%
+    mutate(ltfu_crp_duration = ifelse(ltfu_crp_duration < 0, NA, ltfu_crp_duration)) %>% 
+    #time from when CRp assigned to when traced
+    mutate(trace_crp_duration = ltfu_tracing_date -crp_assigned_date_for_tracing) %>%
+    mutate(trace_crp_duration = ifelse(trace_crp_duration < 0, NA, trace_crp_duration)) %>% 
+    mutate(trace_crp_duration = ifelse(ltfu_tracing_date == as.Date("1900-01-01") | crp_assigned_date_for_tracing == as.Date("1900-01-01")
+                                       , NA, trace_crp_duration)) %>% 
+    #time from when missed appointmnet to when traced date
+    mutate(trace_duration_from_missed = ltfu_tracing_date - missed_appointment_date) %>%
+   # mutate(trace_duration_from_missed = ifelse(trace_duration_from_missed < 0, NA, trace_duration_from_missed)) %>% 
+    mutate(trace_duration_from_missed = ifelse(ltfu_tracing_date == as.Date("1900-01-01") | crp_assigned_date_for_tracing == as.Date("1900-01-01")
+                                       , NA, trace_duration_from_missed)) 
+
+ today <- lubridate::today()
+  
+    write_csv(df_final, glue("Dataout/ethiopia-rtt-patient-data-cleaned-{today}.csv"))
+    
 # VIZ -------------------------------------------------------------------
 
 # SPINDOWN -------------------------------------------------------------------
