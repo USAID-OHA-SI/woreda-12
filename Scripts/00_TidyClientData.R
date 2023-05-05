@@ -81,7 +81,7 @@
       select(Region, Woreda, Age, Gender, `Client ART Start Date`, `Missed Appointment Date`, `LTFU Recorded Date`) %>%
       mutate(Sex = ifelse(Gender == "Male", "0", "1"))%>%
       mutate(age_bands = case_when(
-        Age %in% c(0:4) ~ "0-4",
+        Age %in% c(1:4) ~ "1-4",
         Age %in% c(5:9) ~ "5-9",
         Age %in% c(10:14) ~ "10-14", 
         Age %in% c(15:19) ~ "15-19", 
