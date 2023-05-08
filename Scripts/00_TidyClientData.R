@@ -43,7 +43,7 @@ df <- data_folder %>%
 
     #pt level data
       #want to have columns of age, sex, ART duration, LTFU duration
-        #age groups: <15, 15-24, 25-35, 36-45, 46-50, >50 (align with MER)
+        #age groups: <15, 15-24, 25-35, <35 (align with MER)
         #code sex: 0 for female, 1 for males 
         #ART duration in yrs: <1 , 1-3 yr, 3-6, 7-10, >10yrs
         #LTFU duration in months: <1month , 1-3 months, 4-6 months, >6 months
@@ -55,17 +55,22 @@ df_clean <- df %>%
   #select(region, woreda, age, gender, client_art_start_date, missed_appointment_date, ltfu_recorded_date) %>%
   mutate(sex_binary = ifelse(gender == "Male", "1", "0")) %>%
   mutate(age_bands = case_when(
-    age %in% c(1:4) ~ "1-4",
-    age %in% c(5:9) ~ "5-9",
-    age %in% c(10:14) ~ "10-14", 
-    age %in% c(15:19) ~ "15-19", 
-    age %in% c(20:24) ~ "20-24",
-    age %in% c(25:29) ~ "25-29",
-    age %in% c(30:34) ~ "30-34",
-    age %in% c(35:39) ~ "35-39",
-    age %in% c(40:44) ~ "40-44",
-    age %in% c(45:49) ~ "45-49",
-    age %in% c(50:100) ~ "50+"))
+    #age %in% c(1:4) ~ "1-4", 
+    #age %in% c(5:9) ~ "5-9",
+    #age %in% c(10:14) ~ "10-14", 
+    #age %in% c(15:19) ~ "15-19", 
+    #age %in% c(20:24) ~ "20-24",
+    #age %in% c(25:29) ~ "25-29",
+    #age %in% c(30:34) ~ "30-34",
+    #age %in% c(35:39) ~ "35-39",
+    #age %in% c(40:44) ~ "40-44",
+    #age %in% c(45:49) ~ "45-49",
+    #age %in% c(50:100) ~ "50+"))
+    age %in% c(1:14) ~ "<15",
+    age %in% c(15:24) ~ "15-24",
+    age %in% c(25:35) ~ "25-35",
+    age %in% c(36:100) ~ "<35"))
+    
 
 #Create Tracing variable and RTT variable
 df_clean <- df_clean %>% 
@@ -119,7 +124,29 @@ df_group <- df_clean %>%
   
     write_csv(df_final, glue("Dataout/ethiopia-rtt-patient-data-cleaned-{today}.csv"))
     
+    #Regroup
+      #regions: 5 groups - Addis Ababa, Amhara, Oromia, Gambela, Other regions (Sidama, SNNPR, South West)
+    df_final <- df_final%>%  
+      mutate(region_cat = case_when(
+        region %in% c("Sidama", "SNNPR", "South West") ~ "Other regions",
+        region == "Addis Ababa" ~ "Addis Ababa",
+        region == "Amhara" ~ "Amhara",
+        region == "Oromia" ~ "Oromia",
+        region == "Gambela" ~ "Gambela")) %>% 
+      
+      #health_facility: create binary (health center/clinic/post vs general/tertiary/other)
+      mutate(healthfac_type = case_when(
+        str_detect(health_facility, "Health Center|Clinic|Post") ~ "Health Center, Clinic, or Post",
+        TRUE ~ "General/Tertiary/Other Hospital"))%>%
+    
+      #tracing_attempts: 0,1-2,3+
+      mutate(tracing_attempts = )
+      
+      
+    
 # VIZ -------------------------------------------------------------------
+    
+    
 
 # SPINDOWN -------------------------------------------------------------------
 
