@@ -65,11 +65,18 @@ data_folder <- "Dataout/"
 
 # MUNGE ============================================================================
   
-    df_sample <- df %>% 
+    #Collapse duplicate zones
+    df_clean <- df %>% 
+      mutate(zone_cat = case_when(
+        zone %in% c("Nefas Silk-Lafto", "Nefas Silk Lafto") ~ "Nefas Silk-Lafto",
+        TRUE ~ zone))
+    
+    df_sample <- df_clean %>% 
       dplyr::select(sex_binary, age_bands, year_art_init_gap, healthfac_type,
                     missed_ltfu_dur_grp, missed_custom_report_dur_grp, 
                     tracing_attempt_grp, rtt_binary, traced_binary,
-                    region_cat, tracing_method_grp, woreda, zone, outcome_date) %>% 
+                    region_cat, tracing_method_grp,
+                    woreda, zone, zone_cat, outcome_date) %>% 
       filter(tracing_attempt_grp!="0 attempts") %>% #exclude 0 attempts
       filter(region_cat == "Addis Ababa") #reduce sample size to one region  
     
@@ -90,16 +97,15 @@ data_folder <- "Dataout/"
     label(df_sample$sex_bin)        <- "Sex"
     label(df_sample$age_bands)        <- "Age"
     label(df_sample$region_cat)        <- "Region"
-    label(df_sample$zone)        <- "Zone"
+    label(df_sample$zone_cat)        <- "Zone"
     label(df_sample$healthfac_type)        <- "Health Facility"
     label(df_sample$missed_ltfu_dur_grp)        <- "LTFU duration"
     label(df_sample$missed_custom_report_dur_grp)        <- "Custom Report Duration"
     label(df_sample$tracing_attempt_grp)        <- "Number of tracing attempts"
     label(df_sample$tracing_method_grp)        <- "Tracing Method"
     
-    names(df_sample)
     
-    table1::table1(~sex_bin + age_bands + region_cat + zone + healthfac_type + 
+    table1::table1(~sex_bin + age_bands + region_cat + zone_cat + healthfac_type + 
                      missed_ltfu_dur_grp + missed_custom_report_dur_grp + 
                      tracing_attempt_grp | rtt_bin, data = df_sample,
                    overall = F,
