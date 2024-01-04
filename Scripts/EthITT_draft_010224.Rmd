@@ -1,0 +1,867 @@
+---
+title: " Ethiopia Patient re-engagment Analysis"
+  Data Analysis lead: Melaku D
+  Date: 01/01/2024
+  output:
+  html_document: default
+ 
+---
+
+## Overview
+
+### Background
+
+Write a little bit about Ethiopia community based program
+
+
+### Data Description
+
+**The response variable is:** 
+
+*Return to treatment Value (rtt_binary):* 1 = the patient traced and returned to treatment,
+0= the patient traced but not found or found but not returned to treatment.
+
+**The predicting variables are:** 
+
+*lip:* The implementing partner.
+
+*zone:* The patient's primary residence.
+
+*gender:* The patient's gender of patient( Male , Female).
+
+*age bands:* Age group ( ).
+
+*traced_binary:* The patient traced and found ( yes , no).
+
+*year_art_init_gap* XX.
+
+*missed_ltfu_dur_grp:* XXX.
+
+*missed_custom_report_dur_grp:* XX
+
+*healthfac_type:* XXXX: Hospital, Primary health care and others
+
+*tracing_attempt_grp:* Patient tracing attempts ( 1-2, 3+)
+
+*fiscal_year:* Indicates when patient interrupted treatment and traced. For this analysis , we focus only for  2023
+
+*tracing_method_int:* Indicates patients tracing method.
+
+***
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+*** Check to see if necessary packages are installed.  If not, install them ***
+```{r include=FALSE}
+# lists all packages needed in this notebook
+packages_list = list('knitr', 'tidyverse', 'corrplot', 'caTools', 'car',
+                     'glmnet','caret','kknn','rpart','rpart.plot','randomForest',"pROC","Metrics","scales","e1071","magrittr","partykit","dplyr","magrittr","party","MLmetrics","mlr","Metrics")
+
+
+# checks to see if package is installed.  If not, installs and loads it
+for (i in packages_list) {
+  if (!require(i, character.only=TRUE)) install.packages(i, character.only=TRUE); library(i, character.only=TRUE)
+}
+
+# removes the assignment of i and packages_list
+rm(i, packages_list)
+```
+
+
+## Preparing the Data
+
+### Reading data
+
+```{r, message=FALSE}
+# Read the data using read_csv
+dat <-  read.csv("C:/Users/jstephens/Documents/Treatment/IAS/ethiopia/woreda-12/Dataout/newdata-ethiopia-rtt-patient-data-cleaned-2023-12-11.csv",header=TRUE)
+
+
+```
+
+```{r}
+# check variables 
+variable.names(dat)
+dim(dat)
+```
+
+
+```{r}
+# Keep only useful variables  for our analysis 
+df<- dat[c(2,4,7,8,9,12,16,28,29,31,37,39, 41, 44)]
+#error: 44 does not exist
+#fical year does not exist below
+df<- dat %>% 
+  select(c("lip", "zone", "gender","client_art_start_date","missed_appointment_date",
+           "ltfu_tracing_date","ltfu_tracing_method_1","age_bands","traced_binary",
+           "rtt_binary","missed_ltfu_dur_grp", "missed_custom_report_dur_grp",
+           "healthfac_type"))
+variable.names(df)
+```
+
+### Data Prep
+
+```{r}
+# Convert categorical variables to factors
+df$lip= as.factor(df$lip)
+df$zone= as.factor(df$zone)
+df$gender= as.factor(df$gender)
+df$age_bands= as.factor(df$age_bands)
+
+df$rtt_binary= as.factor(df$rtt_binary)
+df$year_art_init_gap = df$year_art_init_gap
+df$missed_ltfu_dur_grp= as.factor(df$missed_ltfu_dur_grp)
+df$missed_custom_report_dur_grp= as.factor(df$missed_custom_report_dur_grp)
+df$healthfac_type= as.factor(df$healthfac_type)
+df$fiscal_year= as.factor(df$fiscal_year)
+#fical year does not exist 
+df$ltfu_tracing_method_1= as.factor(df$ltfu_tracing_method_1)
+
+```
+
+```{r}
+# summarize sample size by fiscal year
+summary_df<- df %>%
+  group_by(fiscal_year) %>%
+  summarise( count=n()
+    
+  )
+summary_df
+
+```
+
+
+```{r}
+#Mutate tracing method_one
+df<- df %>%
+  mutate(tracing_method_int= case_when (ltfu_tracing_method_1 %in% c("other","informed_by_family","informed_by_treatment_sup")~"other_methods",
+       ltfu_tracing_method_1 %in% c("phone") ~ "phone" , 
+       ltfu_tracing_method_1 %in% c("home_visit" ) ~ "home_visit"))
+
+ df$tracing_method_int = as.factor(df$tracing_method_int) # convert it to a factor
+```
+
+
+```{r}
+# Creating new variables
+
+## Duration on ART before interrupted treatment 
+df$art_int_date <- as.Date(df$client_art_start_date)
+df$itt_date <- as.Date(df$missed_appointment_date)
+df$on_art_duration <- difftime(df$itt_date,df$art_int_date,units = "days")
+
+df <- df %>%
+  mutate(duration_art_missgrp = case_when(on_art_duration < 90 ~ "< 90 days",
+                                           on_art_duration >= 90 & on_art_duration < 365 ~ "90-365 days",
+                                           on_art_duration >= 365 & on_art_duration <= 1095 ~ "1-3 yrs",
+                                           on_art_duration > 1095 ~ "3+ yrs"))
+
+```
+
+
+
+```{r}
+#Number of days between missed date and tracing date initiated 
+df$tracing_date_int <- as.Date(df$ltfu_tracing_date)
+df$missed_tracing_duration <- difftime(df$tracing_date_int,df$itt_date,units = "days")
+df <- df %>%
+  mutate(missed_tracing_dategrp = case_when(missed_tracing_duration < 30 ~ "< 30 days",
+                                         missed_tracing_duration  >= 30 & missed_tracing_duration  < 60 ~ "30-60 days",
+                                          missed_tracing_duration  >= 60 & missed_tracing_duration  <= 90 ~ "60-90 days",
+                                          missed_tracing_duration  > 90 ~ "90 days"))
+
+df$duration_art_missgrp = as.factor(df$duration_art_missgrp)
+df$missed_tracing_dategrp = as.factor(df$missed_tracing_dategrp)
+variable.names(df)
+```
+
+
+
+```{r}
+#Reduce sample size to 2023
+
+df_2023<- df %>%
+  filter(fiscal_year=="2023") 
+
+# Dropping observations with missing values NA's (from 1761to 1535 due to missing ART initiation date )
+
+df_2023_clean <- df_2023 %>% drop_na()
+# Check  NA -missing values for each column  
+colSums(is.na(df_2023_clean))
+```
+
+```{r}
+
+#Dropping columns not considered further in rtt analysis
+df_2023_rtt<- df_2023_clean[, -c(1,2,4,5, 6,7,9,11,12,14,16,17,18,20,21)]
+variable.names(df_2023_rtt)
+```
+
+
+## Exploratory Data Analysis (EDA)
+
+```{r}
+# Set color codes
+gtblue = rgb(0, 48, 87, maxColorValue = 255)
+techgold = rgb(179, 163, 105, maxColorValue = 255)
+buzzgold = rgb(234, 170, 0, maxColorValue = 255)
+bobbyjones = rgb(55, 113, 23, maxColorValue = 255)
+```
+### Relationship between binary response variable and categorical variables
+
+```{r}
+# Barplot rtt against ltfu_tracing_method_1
+
+par(mfrow=c(1,3))
+tb_obtrace = xtabs(~df_2023_rtt$rtt_binary+ df_2023_rtt$tracing_method_int)
+barplot(prop.table(tb_obtrace),axes=T,space=0.3,  cex.axis=1.5, cex.names=1.5,
+        xlab="Proportion of rtt vs not rtt",
+        horiz=T, col=c(gtblue,buzzgold),main=" rttby tracing method")
+
+tb_obgender = xtabs(~df_2023_rtt$rtt_binary+ df_2023_rtt$gender)
+barplot(prop.table(tb_obgender),axes=T,space=0.3,  cex.axis=1.5, cex.names=1.5,
+        xlab="Proportion of rtt vs not rtt",
+        horiz=T, col=c(gtblue,buzzgold),main=" rtt by gender")
+
+tb_obhealthf = xtabs(~df_2023_rtt$rtt_binary+ df_2023_rtt$healthfac_type)
+barplot(prop.table(tb_obhealthf),axes=T,space=0.3,  cex.axis=1.5, cex.names=1.5,
+        xlab="Proportion of rtt vs not rtt",
+        horiz=T, col=c(gtblue,buzzgold),main=" rtt by Health Facility Type")
+
+
+```
+
+There seems to exist significant differences in the proportions for each group in the predicting variables.
+
+```{r}
+table(df_2023_rtt$duration_art_missgrp)
+```
+
+```{r}
+# Setting reference category 
+
+df_2023_rtt$gender2 <- relevel(df_2023_rtt$gender, ref = "Male")
+df_2023_rtt$age_bands2<- relevel(df_2023_rtt$age_bands, ref = "35+")
+df_2023_rtt$tracing_method_int2<- relevel(df_2023_rtt$tracing_method_int, ref = "other_methods")
+
+# convert the variables as factor
+df_2023_rtt$tracing_method_int2= as.factor(df_2023_rtt$tracing_method_int2)
+df_2023_rtt$age_bands2= as.factor(df_2023_rtt$age_bands2)
+df_2023_rtt$gender2 = as.factor(df_2023_rtt$gender2)
+variable.names(df_2023_rtt)
+```
+
+```{r}
+# Filter out lip and zone
+df_2023_rttf <- df_2023_rtt[, -c(1,2,5)]
+
+variable.names(df_2023_rttf)
+
+```
+
+## Logistic Regression and Model Selection
+
+Now, we will build a logistic regression model for predicting which patient are likely to re-engage in the treatment . We will explore Forward-Backward Stepwise Regression, lasso regression and elastic net regression for model selection.
+
+### Data Preparation
+
+
+```{r}
+# Data Split- 70% Train 30% Test - random sampling 
+set.seed(1)
+split = sample.split(df_2023_rttf$rtt_binary, SplitRatio = 0.70)
+train = subset(df_2023_rttf, split == TRUE)
+test = subset(df_2023_rttf, split == FALSE)
+# Checking the length
+sapply(lapply(df_2023_rttf,unique), length)
+```
+
+
+
+### Creating the Full Model
+```{r}
+# Building the model
+full.model <- glm(rtt_binary~.,family = "binomial", data = train)
+summary(full.model)
+```
+
+
+## Model interpretation 
+```{r}
+# interpretation 
+#log_odds=  coffie
+#odds- exp(log-odds)
+#p=odds/(1+odds)
+
+
+# The odds of re-engagement for female is XX% ( higher than male) 
+#1-e^ 0.245571   # or
+# The odd of re-engagement for female changes by a factor of XX relative to a male patient 
+#e^ 0.245571
+
+# the probability of re-engagement ...
+#p=e^ log_odds/1+e^log_ods
+  
+```
+
+### Test for overall regression
+
+```{r}
+# Overall Significance
+gstat = full.model$null.deviance - deviance(full.model)
+pvalue = 1-pchisq(gstat,length(coef(full.model))-1)
+cbind(gstat, pvalue) 
+```
+
+The p-value is almost zero, so we can reject $H_{0}: \beta_{1} = ... = \beta_{p} = 0$. The overall regression appears to have explanatory power.
+
+
+### Model Assessment
+
+1. Multicollinearity
+
+```{r}
+# Calculating GVIF
+vifs <- vif(full.model)
+vifs
+
+```
+
+As GVIFs of variables are less than 10, it indicates that there is not a problem of multicollinearity in the model. 
+
+```{r}
+
+## Test for Goodness of fit (GOF) can be done logistic regression with replications. This model is not but let us just try for checking
+deviances = residuals(full.model,type="deviance") # to get deviance 
+dev.tvalue = sum(deviances^2)  # D=sum of di^2, D~ Chisq_n-p-1
+ 1-pchisq(dev.tvalue,full.model$df.residual) # n-p-1=11
+
+
+## Test for GOF: Using Person residuals
+pearres = residuals(full.model,type="pearson")
+pearson.tvalue = sum(pearres^2)
+ 1-pchisq(pearson.tvalue,full.model$df.residual)
+
+```
+The p-values from both goodness of fit tests are over 0.5, suggesting that we donot reject the null hypothesis that the model is a good fit. 
+
+
+
+```{r}
+# check dispersion parameter
+full.model$deviance/full.model$df.residual
+
+```
+ The estimated dispersion parameter is smaller than 2, so there is no over dispersion problem or it isnot  over dispersion model.
+ 
+```{r}
+confint(full.model, level = 0.95)
+```
+
+
+
+### Variable Selection
+
+1. Forward-Backward Stepwise Regression
+
+```{r, results='asis'}
+# Create minimum model including an intercept
+min.model <-  glm(rtt_binary~ 1, family = "binomial", data = train)
+
+# Perform stepwise regression
+step.model <- step(min.model, scope = list(lower = min.model, upper = full.model),
+                  direction = "both", trace = FALSE)
+summary(step.model)
+which(summary(step.model)$coeff[,4]>0.05)
+```
+
+
+2. Lasso Regression
+
+```{r}
+# Set a seed for reproducibility
+set.seed(1)
+
+# Set predictors and response to correct format
+x.train <- model.matrix(rtt_binary~ ., train)[,-1]
+y.train <- train$rtt_binary
+
+# Use cross validation to find optimal lambda
+cv.lasso <- cv.glmnet(x.train, y.train, alpha = 1, family = "binomial")
+
+# Train Lasso and display coefficients with optimal lambda
+lasso.model <- glmnet(x.train, y.train, alpha = 1, family = "binomial")
+coef(lasso.model, cv.lasso$lambda.min)
+```
+
+3. Elastic Net Regression
+
+```{r}
+set.seed(1)
+
+# Use cross validation to find optimal lambda
+cv.elnet <- cv.glmnet(x.train, y.train, alpha = 0.5, family = "binomial")
+
+# Train Elastic Net and display coefficients with optimal lambda
+elnet.model <- glmnet(x.train, y.train, alpha = 0.5, family = "binomial")
+coef(elnet.model, cv.elnet$lambda.min)
+```
+
+4. Variable Selection Comparison
+
+```{r}
+# Identify variables not selected by F-B Stepwise regression
+index.step <- which(!(names(coef(full.model)) %in% names(coef(step.model))))
+cat("\n Variables not selected by forward-backward stepwise:",
+    names(coef(full.model)[index.step]))
+
+# Identify variables not selected by Lasso
+index.lasso <- which(coef(lasso.model, cv.lasso$lambda.min) == 0)
+cat("\n Variables not selected by lasso regression: ",
+    names(coef(full.model)[index.lasso]))
+
+# Identify variables not selected by Elastic Net
+index.elnet <- which(coef(elnet.model, cv.elnet$lambda.min) == 0)
+cat("\n Variables not selected by elastic net regression:",
+    names(coef(full.model)[index.elnet]))
+
+```
+
+
+```{r}
+# Removing variables not selected by stepwise regression
+step.predictors <-  names(coef(full.model)[index.step])
+x.train <- as.data.frame(x.train)
+train.final <- x.train[, - which(colnames(x.train) %in% step.predictors)]
+
+```
+
+
+### Prediction of Patient re-engagement: Logistic Regression
+
+Now, we are on to do the predictions using the models we just created. A classification threshold of 0.5 is used. Note that this threshold could be tuned depending on the sensitivity/specificity tolerance. In this case, it becomes important to identify patient who interrupted treatment that are likely to re-engage in the treatment  so that the corrective measures can be taken. or patients who are likely not to re-engage in the the treatment ./
+
+```{r}
+# 1. Prediction for the full logistic regression model
+# Obtain predicted probabilities for the test set
+pred.full = predict(full.model, newdata = test,type="response")
+# Obtain classifications using a classification threshold of 0.5
+predClass.full = ifelse(pred.full > 0.5, 1, 0)
+
+# 2. Prediction for the stepwise regression 
+# Obtain predicted probabilities for the test set
+pred.step = predict(step.model, newdata = test, type = "response")
+# Obtain classifications using a classification threshold of 0.5
+predClass.step = ifelse(pred.step > 0.5, 1, 0)
+
+# 3. Prediction for the lasso regression
+# Retrain OLS model using Lasso-selected predictors
+lasso.predictors <- as.data.frame(x.train)[-(index.lasso-1)]
+lasso.retrained <- glm(y.train ~ . , family = "binomial", data = lasso.predictors)
+# Set test data to correct format
+new_test <- model.matrix( ~ ., test)[,-1]
+# Obtain predicted probabilities for the test set
+pred.lasso = predict(lasso.retrained, newdata = as.data.frame(new_test),
+                     type = "response")
+# Obtain classifications using a classification threshold of 0.5
+predClass.lasso = ifelse(pred.lasso > 0.5, 1, 0)
+
+# 4. Prediction for elastic net regression 
+# Set predictors to correct format
+x.test <- model.matrix(rtt_binary ~ ., test)[,-1]
+# Obtain predicted probabilities for the test set
+pred.elnet = as.vector(predict(elnet.model, newx = x.test,
+                               type = "response", s = cv.elnet$lambda.min))
+# Obtain classifications using a classification threshold of 0.5
+predClass.elnet = ifelse(pred.elnet > 0.5, 1, 0)
+
+# Create a data frame with the predictions
+preds = data.frame(rttvalue= test$rtt_binary, predClass.full,
+                   predClass.step, predClass.lasso, predClass.elnet)
+```
+
+### Classification Evaluation Metrics
+
+Now we could see how the models are doing when predicting on a new set of data. We will calculate the Accuracy, the Sensitivity (true positive rate) and the Specificity ( Penalize more false positive rate) metrics to evaluate these models at 0.5 threshold. We want our model to be perfectly sure about the patients who will not engage in the treatment, So we want higher specificity.  Good example about metrics :https://medium.com/enjoy-algorithm/methods-to-check-the-performance-of-the-classification-models-55ec50e0a914
+
+```{r}
+# Build a confusion table and calculate metrics
+pred_metrics = function(modelName, actualClass, predClass) {
+  cat(modelName, '\n')
+  conmat <- confusionMatrix(table(actualClass, predClass))
+  c(conmat$overall["Accuracy"], conmat$byClass["Sensitivity"],
+    conmat$byClass["Specificity"])
+}
+
+pred_metrics("Full Model",test$rtt_binary, predClass.full)
+pred_metrics("Stepwise Regression Model",test$rtt_binary, predClass.step)
+pred_metrics("Lasso Regression Model",test$rtt_binary, predClass.lasso)
+pred_metrics("Elastic Regression Model",test$rtt_binary, predClass.elnet)
+```
+
+```{r}
+# calculate the area under the curve for all models based on probabilities
+auc.full.pr = auc(test$rtt_binary, pred.full)
+auc.step.pr = auc(test$rtt_binary, pred.step)
+auc.lasso.pr = auc(test$rtt_binary, pred.lasso)
+auc.elnet.pr = auc(test$rtt_binary, pred.elnet)
+data.frame('Full Model AUC' = auc.full.pr,
+           'Stepwise AUC' = auc.step.pr,
+           'Lasso AUC' = auc.lasso.pr,
+           'Elastic Net AUC' = auc.elnet.pr)
+
+# calculate the area under the curve for all models based on classifications
+auc.full = auc(test$rtt_binary, as.numeric(predClass.full))
+auc.step = auc(test$rtt_binary, as.numeric(predClass.step))
+auc.lasso = auc(test$rtt_binary, as.numeric(predClass.lasso))
+auc.elnet = auc(test$rtt_binary, as.numeric(predClass.elnet))
+data.frame('Full Model AUC' = auc.full,
+           'Stepwise AUC' = auc.step,
+           'Lasso AUC' = auc.lasso,
+           'Elastic Net AUC' = auc.elnet)
+
+par(mfrow=c(2,2))
+# plot the ROC for full model
+plot(roc(test$rtt_binary, pred.full), main = 'Full Model ROC')
+# plot the ROC for stepwise
+plot(roc(test$rtt_binary, pred.step), main = 'Stepwise Model ROC') 
+# plot the ROC for the lasso model
+plot(roc(test$rtt_binary, pred.lasso), main = 'Lasso Model ROC') 
+# plot the ROC for the elastic net model
+plot(roc(test$rtt_binary, pred.elnet), main = 'Elastic Net Model ROC') 
+```
+
+
+All models have very similar prediction metrics. In this case, we are concerned about identifying the patients that are not likely to re-engage in the treatment. Since correctly identifying positives is important for us, then we should choose a model with higher Specificity . The model that includes the variables selected by Lasso Regression has the highest Specificity  but Stepwise has higher AUC. We need to consider three metrics to pick model once we re-create age-band and other variables .
+
+
+## K-Nearest Neighbor (KNN) Classification
+
+Next, we will use K-Nearest Neighbor (KNN) for predicting which patient are likely to re-engage. We will look at different kernels to measure the distance between neighbors: rectangular (which is standard unweighted knn), triangular, epanechnikov, and optimal.
+
+### Data Prep
+
+```{r}
+# Convert response to factor
+y.train <- as.factor(train$rtt_binary)
+y.test <- as.factor(test$rtt_binary)
+
+# Dummify categorical features
+dummies.train <- dummyVars(rtt_binary ~ ., data = train)
+dummies.test <- dummyVars(rtt_binary ~ ., data = test)
+
+
+# Create data frames containing the predictors 
+x.train.knn <- data.frame(predict(dummies.train, newdata = train))
+x.test.knn <- data.frame(predict(dummies.test, newdata = test))
+```
+
+### Train the KNN model
+
+```{r}
+# Set a seed for reproducibility
+set.seed (1)
+# Use leave-one-out cross-validation to find the optimal value of "k"
+(kknn.train <- train.kknn(y.train ~ ., x.train.knn, kmax = 50, 
+                         kernel = c("triangular", "rectangular",
+                                    "epanechnikov", "optimal"),
+                         scale = TRUE))
+# Plot of missclasfication errors vs. k for different kernels
+plot(kknn.train)
+# Extracting optimal kernel and k
+cat("\n The lowest missclassification error is achieved with a",
+    kknn.train$best.parameters[[1]],
+    "kernel and a number of nearest neighbors (k) of",
+    kknn.train$best.parameters[[2]])
+```
+
+### Prediction and Model Evaluation on Test Set
+```{r}
+# Predict the labels on the test set
+pred.knn <- predict(kknn.train, x.test.knn)
+#  Calculate classification Evaluation Metrics
+pred_metrics("KNN", y.test, pred.knn)
+#  Calculate AUC
+auc.knn = auc(y.test, as.numeric(pred.knn))
+```
+
+## Decision Tree and Random Forest
+
+In this section, we will use tree-based models such as decision tree and random forest for predicting which patients are likely to re-engage. In order to compare the predictions from both models, we will be using measures such as accuracy, sensitivity, and specificity.
+
+### Decision Tree
+
+Initially, we will remove the unnecessary spaces from the variable names, build our decision tree model, and plot it, to take a look at the tree structure and its splits.
+
+```{r}
+#1. Removing the spaces from variable names
+names(train)<-str_replace_all(names(train), c(" " = "." ))
+names(test)<-str_replace_all(names(test), c(" " = "." ))
+#2. Building model
+set.seed(300)
+decision_tree <- rpart(rtt_binary~., data = train, method = "class")
+#3. Plotting model
+rpart.plot(decision_tree, box.palette = c(buzzgold, gtblue), shadow.col = "gray", nn=TRUE)
+
+```
+In order to understand how the different probabilities of re-engagement change for different patients and  features, we can analyze the decision tree model built above. The results are presented in the tree plot. The first number in the node corresponds to the classification of the node (0 if not re-engaged and 1 if re-engaged). The second number in the node corresponds to the % of the patients on the other classification. The third value in the node measures the total % of patients that are included in that node.
+
+The most important insights from this plot are:
+
+\begin{itemize}
+\item The most important variable in determining  re-engagement rate  is type of tracing method. If the tracing method is phone or other methods  the probability patients will  re-engage is 73%. The probabilities of re-engage are much higher if tracing method is home-visit. 68% of the total patients in the testing dataset fall in this category.
+\item If the number of days between missed appointment and tracing is 90 days, , the probability it will re-engaged  is only 55%. Only 18% of patients are in this node.
+
+\item Overall, the probabilities of re-engagement  are high for XXX. The IPs can create XXXX.
+
+\end{itemize}
+
+Now, since we have already fitted and plotted the model, we will use cross-validation using plotcp (function of the rpart package) the complexity parameter table for the decision tree fit. This function will give us a visual representation of the cross-validation results in the decision tree object we just created.
+
+```{r}
+#4. Visualize cross-validation in table format
+printcp(decision_tree)
+#5. Plot the complexity parameter table
+plotcp(decision_tree,minline = TRUE, lty = 3,col = buzzgold)
+```
+The table and plot contain the mean and standard deviation of the errors in the cross-validated prediction against each of the geometric means, which are displayed above. A good choice of cp for pruning is often the leftmost value for which the mean lies below the horizontal line. The main goal here is to control the size of the decision tree and to select the optimal tree size. If the cost of adding another variable to the decision tree from the current node is above the value of cp, then tree building does not continue. We could also say that tree construction does not continue unless it would decrease the overall lack of fit by a factor of cp. As we noticed above, our tree had 7 variables and that is the optimal size, confirmed by the cp plot.
+
+Since our tree is already in the optimal size, there is no need to prune it. However, in case we need to prune it, rpart package also contains a function where you reference the tree model and the optimal cp number, which in this case is 0.018 as you can see in the code below:
+```{r}
+#6. Prune the tree model
+pruned_tree <- prune(decision_tree,0.018)
+#7. Predict Churn Score
+predicted_return_TX_score <- predict(pruned_tree,test,type="class")
+#  Calculate classification Evaluation Metrics
+pred_metrics("Decision Tree", test$rtt_binary, predicted_return_TX_score )
+#  Calculate AUC
+auc.dec.tree = auc(test$rtt_binary, as.numeric(predicted_return_TX_score ))
+auc.dec.tree
+```
+
+Above we have used our test data to make predictions using our decision tree model. We then classified the prediction results into 0 or 1 with type = "class", and finally created a confusion matrix to analyze the results and accuracy of our predictions. As we can see above, we have true/false positives/negatives, and on the bottom, accuracy, sensitivity, and specificity are also shown. Please note that we got NA for sensitivity. We can address this :https://stackoverflow.com/questions/48450222/getting-sensitivity-after-fitting-decision-tree-with-caret
+
+
+
+### Random Forest
+
+Now we will explore how to build a random forest model. While a decision tree is built on an entire dataset, using all the features/variables of interest, a random forest model selects observations/rows and specific features/variables to build multiple decision trees from, and then averages the results. This way, random forests are a stronger modeling technique and more robust than a single decision tree. Since they aggregate many decision trees, they limit overfitting, as well as error due to bias and therefore can produce better results.
+
+```{r}
+set.seed(300)
+
+# 1. Build Random Forest Model
+rf <- randomForest(factor(rtt_binary)~.,data = train)
+# 2. Predict using Random Forest Model
+pred_test <- predict(rf, test, type="class")
+#  Calculate classification Evaluation Metrics
+pred_metrics("Random Forest Model", test$rtt_binary, pred_test)
+#  Calculate AUC
+auc.rand.forest = auc(test$rtt_binary, as.numeric(pred_test))
+auc.rand.forest
+
+```
+
+
+In this case, the accuracy of the random forest model was just slightly better than decision tree, and that can happen for different reasons. One reason is dataset size and variability, depending on those two factors, the different subsets of data and variables selected for each tree can become very similar. Another possibility is that predicting only on the test set can result in different accuracies compared to predicting on the entire dataset. Using the test set predictions we can see metrics very similar to the decision tree model.
+
+## Final Conclusions
+
+Finally, once we are done with the complete analysis of a dataset, we need to compare the models to see which performs better, and possibly continue to tune it to achieve greater results. To make the comparison process easier, we can use the function pred_metrics previously created to calculate important classification metrics.
+
+```{r}
+pred_metrics("Full Model",test$rtt_binary, predClass.full)
+pred_metrics("Stepwise Regression Model",test$rtt_binary, predClass.step)
+pred_metrics("Lasso Regression Model",test$rtt_binary, predClass.lasso)
+pred_metrics("Elastic Regression Model",test$rtt_binary, predClass.elnet)
+pred_metrics("KNN", y.test, pred.knn)
+pred_metrics("Decision Tree Model",test$rtt_binary, predicted_return_TX_score)
+pred_metrics("Random Forest Model",test$rtt_binary, pred_test)
+```
+
+From the classification metrics above, we can see that both the  Random Forest, KNN and Lasso Regression models have slightly better metrics than the other models considering specificity. However Logistic regression and other models ( except KNN) perform  similarly considering accuracy.Therefore, those could be the chosen ones to continue to tune and work with. It is important to some models such as decision trees when tuned, can out perform other logistic regression models. In conclusion, we can say that for this occasion, Logistic Regression models good ones.
+
+### Implications of this Problem
+
+The implications of analyzing datasets such this one are very important for service providers and IPs looking to re-engage patients.  The Logistic Regression models shows that Ips could also produce classification models to predict the probability of a patient re-engagement.  For example, IPs could use classification to determine which patients are most likely to re-engagement to determine the high-priority patients to reach out to and when to initiate tracing and what method is effective. This information helps the Ips focus its retention efforts and improve quality of patients care and epidemic control  because .......
+
+
+
+
+
+
+
+************ye Alternative models evaluation using cross-validation without random splitting data************ 
+
+### Model preparation
+
+```{r}
+# Define a summary function for classification evaluation
+mySummary <- function(data, lev = NULL, model = NULL) {
+  # Compute the confusion matrix
+  cm <- confusionMatrix(data[, "pred"], data[, "obs"])
+  
+  # Compute the metrics
+  out <- c(
+    Accuracy = cm$overall["Accuracy"],
+    Kappa = cm$overall["Kappa"],
+    Sensitivity = cm$byClass["Sensitivity"],
+    Specificity = cm$byClass["Specificity"],
+    Pos_Pred_Value = cm$byClass["Pos Pred Value"],
+    Neg_Pred_Value = cm$byClass["Neg Pred Value"],
+    Precision = cm$byClass["Pos Pred Value"],
+    Recall = cm$byClass["Sensitivity"],
+    F1 = 2 * ((cm$byClass["Pos Pred Value"] * cm$byClass["Sensitivity"]) / (cm$byClass["Pos Pred Value"] + cm$byClass["Sensitivity"]))
+  )
+# Compute AUC if the probabilities of the positive class are available
+  if ("Class1" %in% colnames(data)) {
+    roc_obj <- pROC::roc(data$obs, data[["Class1"]])
+    out["AUC"] <- pROC::auc(roc_obj)
+  }
+  out
+}
+
+# Create the train control
+myControl <- trainControl(
+  method = "cv", 
+  number = 5,   # K=5, this can be changed
+  summaryFunction = mySummary, 
+  classProbs = TRUE,  # Set TRUE to get AUC
+  savePredictions = "all"
+)
+
+```
+
+### Logistic regression
+
+```{r}
+# Ensure the outcome is a factor
+df_2023_rttf$rtt_binary <- as.factor(df_2023_rttf$rtt_binary)
+
+# Temporarily rename the levels for training
+levels(df_2023_rttf$rtt_binary) <- c('Class0', 'Class1')
+
+set.seed(123)
+model <- caret::train(rtt_binary ~ ., 
+               data = df_2023_rttf, 
+               method = "glm", 
+               trControl = myControl,
+               metric = "Accuracy")  # or any other metric you want to optimize
+
+# Print the resampling results which will include Accuracy, Kappa, Sensitivity, Specificity, Precision, Recall, F1 and AUC
+print(model$resample)
+
+average_metrics <- colMeans(model$resample[, c("Accuracy.Accuracy", "Precision.Pos Pred Value", 
+                                               "Recall.Sensitivity", "F1.Pos Pred Value", "AUC")], 
+                            na.rm = TRUE)
+
+# Print the average metrics
+print(average_metrics)
+
+# Revert the levels back to original
+# levels(df_2023_rttf$rtt_binary) <- c('0', '1')
+```
+
+
+
+### Decision Tree
+
+```{r}
+# Decision Tree
+set.seed(123)
+model_dt <- caret::train(rtt_binary ~ ., 
+               data = df_2023_rttf, 
+               method = "rpart", 
+               trControl = myControl,
+               metric = "Accuracy")  # or any other metric you want to optimize
+
+# Calculate the average metrics
+average_metrics_dt <- colMeans(model_dt$resample[, c("Accuracy.Accuracy", "Precision.Pos Pred Value", 
+                                               "Recall.Sensitivity", "F1.Pos Pred Value", "AUC")], 
+                            na.rm = TRUE)
+
+# Print the average metrics
+print(average_metrics_dt)
+
+
+```
+
+### Random Forest
+
+```{r}
+# Random Forest
+set.seed(123)
+model_rf <- caret::train(rtt_binary~ ., 
+               data = df_2023_rttf, 
+               method = "rf", 
+               trControl = myControl,
+               metric = "Accuracy")  # or any other metric you want to optimize
+
+# Calculate the average metrics
+average_metrics_rf <- colMeans(model_rf$resample[, c("Accuracy.Accuracy", "Precision.Pos Pred Value", 
+                                               "Recall.Sensitivity", "F1.Pos Pred Value", "AUC")], 
+                            na.rm = TRUE)
+
+# Print the average metrics
+print(average_metrics_rf)
+
+
+```
+
+### XGBoost
+
+```{r}
+# XGBoost
+set.seed(123)
+my_number <- 10
+model_xgb <- caret::train(rtt_binary ~ ., 
+               data = df_2023_rttf, 
+               method = "xgbTree", 
+               trControl = myControl,
+               metric = "Accuracy" )  # or any other metric you want to optimize
+
+# Calculate the average metrics
+average_metrics_xgb <- colMeans(model_xgb$resample[, c("Accuracy.Accuracy", "Precision.Pos Pred Value", 
+                                               "Recall.Sensitivity", "F1.Pos Pred Value", "AUC")], 
+                            na.rm = TRUE)
+
+# Print the average metrics
+print(average_metrics_xgb)
+
+
+```
+
+#### Data scaling
+
+```{r}
+scaled_data <-df_2023_rtt
+pre_process <- preProcess(df_2023_rttf, method = c("center", "scale"))
+scaled_data<- predict(pre_process, df_2023_rttf)
+
+```
+
+### SVM
+
+```{r}
+# SVM
+set.seed(123)
+model_svm <- caret::train(rtt_binary~ ., 
+               data = scaled_data,  # use normalized data for SVM
+               method = "svmRadial", 
+               trControl = myControl,
+               metric = "Accuracy")  # or any other metric you want to optimize
+
+# Calculate the average metrics
+average_metrics_svm <- colMeans(model_svm$resample[, c("Accuracy.Accuracy", "Precision.Pos Pred Value", 
+                                               "Recall.Sensitivity", "F1.Pos Pred Value", "AUC")], 
+                            na.rm = TRUE)
+
+# Print the average metrics
+print(average_metrics_svm)
+
+```
+
+
+
