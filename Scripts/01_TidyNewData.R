@@ -1,10 +1,10 @@
 # PROJECT: Analyze new IIT data 
 # PURPOSE: Munge and Analysis of IIT Data 
-# AUTHOR: Lemlem Baraki | SI
+# AUTHOR: Lemlem Baraki, Karishma Srikanth| SI
 # REF ID:   eabe7b34
 # LICENSE: MIT
 # DATE: 2023-12-04
-# NOTES: Lemlem Baraki | SI
+# UPDATED: 2023-12-21 
 
 # LOCALS & SETUP ============================================================================
 
@@ -133,12 +133,22 @@
                                            tracing_attempts %in% c("3", "4", "5") ~ "3+ attempts",
                                            TRUE ~ "0 attempts"))  
     
+  #create fiscal year based on 30 days after missed appt date
+    df_clean <- df_clean %>% 
+      mutate(missed_appt_30_days_after = missed_appointment_date + 30) %>% 
+      mutate(fiscal_year = if_else(month(missed_appt_30_days_after) >= 10,
+                                   year(missed_appt_30_days_after) + 1,
+                                   year(missed_appt_30_days_after))) 
+    
   #Tracing method grouping
     df_final <- df_clean %>%
     mutate(tracing_method_grp = case_when(ltfu_tracing_method_3 %in% c("informed_by_family",
                                                                        "informed_by_treatment_supporter") ~ "informed",
                                           TRUE ~ ltfu_tracing_method_3)) 
   
+   df_final <- df_final %>% 
+      filter(tracing_attempt_grp!="0 attempts") %>% #exclude 0 attempts
+      filter(region_cat == "Addis Ababa") #reduce sample size to one region 
 
 
 # VIZ ============================================================================
@@ -233,7 +243,7 @@
     
 # SPINDOWN ============================================================================
 
-  today <- lubridate::today()
+ # today <- lubridate::today()
   
-  write_csv(df_final, glue("Dataout/newdata-ethiopia-rtt-patient-data-cleaned-{today}.csv"))  
+  write_csv(df_final, glue("Dataout/newdata-ethiopia-rtt-patient-data-cleaned-{lubridate::today()}.csv"))  
   
